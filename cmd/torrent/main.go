@@ -5,13 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"math/rand"
 	"os"
 	"strings"
 )
 
 const VERSION = "0.1.0"
+
+func makePeerId() string {
+	// A peer ID is 20 bytes long. There are a few conventions in use for peer
+	// IDs. The one used here (Azureus-style) includes a client and version
+	// identifier alongside 12 random numbers.
+	min, max := 100_000_000_000, 999_999_999_999
+	randVal := rand.Intn(max+1-min) + min
+
+	return fmt.Sprint("-GX0010-", randVal)
+}
 
 func OpenTorrent(filename string) *Torrent {
 	contents, err := os.ReadFile(filename)
@@ -20,33 +29,26 @@ func OpenTorrent(filename string) *Torrent {
 			fmt.Printf("The filename %q does not exist.\n", filename)
 			os.Exit(1)
 		} else {
-			panic(err)
+			log.Fatal(err)
 		}
 	}
 
 	tokens, err := DecodeBencode(string(contents))
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	metainfo, ok := tokens[0].(map[string]any)
 	if !ok {
-		panic("data error: expected metainfo dictionary.")
+		log.Fatal("data error: expected metainfo dictionary.")
 	}
 
 	torrent, err := NewTorrent(metainfo)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	return torrent
-}
-
-func makePeerId() string {
-	min, max := 100_000_000_000, 999_999_999_999
-	randVal := rand.Intn(max+1-min) + min
-
-	return fmt.Sprint("-ST0010-", randVal)
 }
 
 func ShowPeers(filename string) {
@@ -65,6 +67,7 @@ func ShowPeers(filename string) {
 	fmt.Printf("request interval: %d seconds\n", resp.Interval)
 
 	if len(resp.Peers) <= 0 {
+		log.Printf("no peers")
 		return
 	}
 
@@ -79,8 +82,8 @@ func ShowPeers(filename string) {
 func ShowPieces(filename string) {
 	torrent := OpenTorrent(filename)
 
-	for idx := 0; idx <= len(torrent.Info.Pieces)-20; idx += 20 {
-		pieceStr := hex.EncodeToString([]byte(torrent.Info.Pieces[idx : idx+20]))
+	for _, piece := range torrent.Info.PieceHashes() {
+		pieceStr := hex.EncodeToString([]byte(piece))
 		fmt.Printf("%v\n", pieceStr)
 	}
 }
@@ -109,15 +112,16 @@ func ShowInfo(filename string) {
 
 	fmt.Println("piece length:", HumanBytes(torrent.Info.PieceLength))
 
-	pieceCount := int64(math.Ceil(float64(len(torrent.Info.Pieces)) / 20))
-	fmt.Printf("pieces [%d]: \n", pieceCount)
+	pieceHashes := torrent.Info.PieceHashes()
 
-	for idx := 0; idx <= 2*20; idx += 20 {
-		pieceStr := hex.EncodeToString([]byte(torrent.Info.Pieces[idx : idx+20]))
+	fmt.Printf("pieces [%d]: \n", len(pieceHashes))
+
+	for idx := range 2 {
+		pieceStr := hex.EncodeToString([]byte(pieceHashes[idx]))
 		fmt.Printf("  %v\n", pieceStr)
 	}
 
-	if pieceCount > 3 {
+	if len(pieceHashes) > 3 {
 		fmt.Println("  (...)")
 	}
 
@@ -133,7 +137,7 @@ func ShowInfo(filename string) {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Printf("gostream %s\n", VERSION)
-		fmt.Printf("usage: %s {info,pieces,peers} <options>\n", os.Args[0])
+		fmt.Printf("usage: %s {info,peers,pieces} <options>\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -142,28 +146,24 @@ func main() {
 	switch progArgs[0] {
 	case "info":
 		if len(progArgs) < 2 {
-			fmt.Printf("usage: %s info <filename>\n", os.Args[0])
-			os.Exit(1)
+			log.Fatalf("usage: %s info <filename>\n", os.Args[0])
 		}
 		ShowInfo(progArgs[1])
-
 	case "pieces":
 		if len(progArgs) < 2 {
-			fmt.Printf("usage: %s pieces <filename>\n", os.Args[0])
-			os.Exit(1)
+			log.Fatalf("usage: %s pieces <filename>\n", os.Args[0])
 		}
 
 		ShowPieces(progArgs[1])
 	case "peers":
 		if len(progArgs) < 2 {
-			fmt.Printf("usage: %s peers <filename>\n", os.Args[0])
-			os.Exit(1)
+			log.Fatalf("usage: %s peers <filename>\n", os.Args[0])
 		}
 
 		ShowPeers(progArgs[1])
 	default:
 		fmt.Printf("invalid subcommand %q\n", progArgs[0])
-		fmt.Printf("subcommands: info, pieces, peers\n")
+		fmt.Printf("subcommands: info, peers, pieces\n")
 		os.Exit(1)
 	}
 }
