@@ -1,5 +1,5 @@
 /*
-Implementation of the BitTorrent protocol.
+Client implementation of the BitTorrent protocol.
 
 Original spec:
 	https://bittorrent.org/beps/bep_0003.html
@@ -12,7 +12,11 @@ package main
 
 import (
 	"crypto/sha1"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 )
 
 type Torrent struct {
@@ -38,6 +42,25 @@ type InfoFile struct {
 	Length int
 	// A slice of path parts ending with the filename.
 	Path []string
+}
+
+type TrackerResponse struct {
+	Interval int
+	Peers    []TrackerPeer
+}
+
+type TrackerPeer struct {
+	Ip     string
+	Port   int
+	PeerId string
+}
+
+type ErrFailureReason struct {
+	Message string
+}
+
+func (err *ErrFailureReason) Error() string {
+	return err.Message
 }
 
 func newInfoFileSlice(items []any) ([]InfoFile, error) {
@@ -134,4 +157,102 @@ func (i *Info) Hash() ([]byte, error) {
 	infoHash := sha1.New()
 	infoHash.Write([]byte(bencoded))
 	return infoHash.Sum(nil), nil
+}
+
+func compactToPeerList(peers string) []TrackerPeer {
+	var peerList []TrackerPeer
+	peerBytes := []byte(peers)
+
+	for idx := 0; idx < len(peerBytes); idx += 6 {
+		ipBytes := peerBytes[idx : idx+4]
+		portBytes := peerBytes[idx+4 : idx+6]
+
+		portInt := binary.BigEndian.Uint16(portBytes)
+		ip := fmt.Sprintf("%d.%d.%d.%d", ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3])
+
+		peerList = append(peerList, TrackerPeer{Port: int(portInt), Ip: ip})
+	}
+
+	return peerList
+}
+
+/* Gets announced tracker peers. */
+func (t *Torrent) GetPeers(peerId string) (*TrackerResponse, error) {
+	announce, err := url.Parse(t.AnnounceURL)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse url: %w", err)
+	}
+
+	switch announce.Scheme {
+	case "http", "https":
+		query := announce.Query()
+
+		infohash, err := t.Info.Hash()
+		if err != nil {
+			return nil, fmt.Errorf("could not get info hash: %w", err)
+		}
+
+		query.Set("info_hash", string(infohash))
+		query.Set("peer_id", peerId)
+		query.Set("left", fmt.Sprint(*t.Info.Length))
+		query.Set("downloaded", "0")
+		query.Set("uploaded", "0")
+		// TODO: This would preferably be cycled (port in URL, then 6881, then 6882, and so on).
+		query.Set("port", "6881")
+
+		announce.RawQuery = query.Encode()
+	default:
+		return nil, fmt.Errorf("unsupported scheme: %s", announce.Scheme)
+	}
+
+	resp, err := http.Get(announce.String())
+	if err != nil {
+		return nil, fmt.Errorf("request to tracker failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	read, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("could not read response: %w", err)
+	}
+
+	tokens, err := DecodeBencode(string(read))
+	if err != nil {
+		return nil, fmt.Errorf("could not decode response: %w", err)
+	}
+
+	response, ok := tokens[0].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type: %v", response)
+	}
+
+	if failure, ok := response["failure reason"]; ok {
+		return nil, &ErrFailureReason{Message: failure.(string)}
+	}
+
+	var peerList []TrackerPeer
+	switch peers := response["peers"].(type) {
+	case []any:
+		for _, peer := range peers {
+			peer, ok := peer.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("peer of unexpected type: %v", peer)
+			}
+
+			peerList = append(peerList, TrackerPeer{
+				Ip:     peer["ip"].(string),
+				Port:   peer["port"].(int),
+				PeerId: peer["peer id"].(string),
+			})
+		}
+	case string:
+		peerList = compactToPeerList(peers)
+	default:
+		return nil, fmt.Errorf("unknown peer list kind: %v", peers)
+	}
+
+	return &TrackerResponse{
+		Interval: response["interval"].(int),
+		Peers:    peerList,
+	}, nil
 }

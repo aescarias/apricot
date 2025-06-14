@@ -4,7 +4,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"math"
+	"math/rand"
 	"os"
 	"strings"
 )
@@ -38,6 +40,40 @@ func OpenTorrent(filename string) *Torrent {
 	}
 
 	return torrent
+}
+
+func makePeerId() string {
+	min, max := 100_000_000_000, 999_999_999_999
+	randVal := rand.Intn(max+1-min) + min
+
+	return fmt.Sprint("-ST0010-", randVal)
+}
+
+func ShowPeers(filename string) {
+	torrent := OpenTorrent(filename)
+
+	resp, err := torrent.GetPeers(makePeerId())
+	var fr *ErrFailureReason
+	if errors.As(err, &fr) {
+		log.Fatalf("tracker returned error: %s", fr.Message)
+	}
+
+	if err != nil {
+		log.Fatalf("could not get peers: %v\n", err)
+	}
+
+	fmt.Printf("request interval: %d seconds\n", resp.Interval)
+
+	if len(resp.Peers) <= 0 {
+		return
+	}
+
+	for idx, peer := range resp.Peers {
+		fmt.Println("peer", idx+1)
+		fmt.Println("  ip:     ", peer.Ip)
+		fmt.Println("  port:   ", peer.Port)
+		fmt.Printf("  peer id: %x\n", peer.PeerId)
+	}
 }
 
 func ShowPieces(filename string) {
@@ -97,7 +133,7 @@ func ShowInfo(filename string) {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Printf("gostream %s\n", VERSION)
-		fmt.Printf("usage: %s {info,pieces} <options>\n", os.Args[0])
+		fmt.Printf("usage: %s {info,pieces,peers} <options>\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -118,10 +154,16 @@ func main() {
 		}
 
 		ShowPieces(progArgs[1])
+	case "peers":
+		if len(progArgs) < 2 {
+			fmt.Printf("usage: %s peers <filename>\n", os.Args[0])
+			os.Exit(1)
+		}
+
+		ShowPeers(progArgs[1])
 	default:
 		fmt.Printf("invalid subcommand %q\n", progArgs[0])
-		fmt.Printf("subcommands: info, pieces\n")
+		fmt.Printf("subcommands: info, pieces, peers\n")
 		os.Exit(1)
-
 	}
 }
