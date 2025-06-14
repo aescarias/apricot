@@ -8,53 +8,53 @@ import (
 )
 
 type Scanner struct {
-	contents     string
-	currentIndex int
+	Contents     string
+	CurrentIndex int
 }
 
-// Returns whether the scanner has reached the end of contents
-func (s *Scanner) ended() bool {
-	return s.currentIndex >= len(s.contents)
+// Ended reports whether the scanner has reached the end of contents
+func (s *Scanner) Ended() bool {
+	return s.CurrentIndex >= len(s.Contents)
 }
 
-// Gets 'n' characters from the scanner without advancing.
-func (s *Scanner) peek(n int) (string, error) {
-	if s.currentIndex+n-1 >= len(s.contents) {
+// Peek gets 'n' characters from the scanner without advancing.
+func (s *Scanner) Peek(n int) (string, error) {
+	if s.CurrentIndex+n-1 >= len(s.Contents) {
 		return "", io.EOF
 	}
-	return s.contents[s.currentIndex : s.currentIndex+n], nil
+	return s.Contents[s.CurrentIndex : s.CurrentIndex+n], nil
 }
 
-// Consumes and returns at most 'n' characters.
-func (s *Scanner) consume(n int) (string, error) {
-	consumed, err := s.peek(n)
+// Consume consumes and returns at most 'n' characters.
+func (s *Scanner) Consume(n int) (string, error) {
+	consumed, err := s.Peek(n)
 	if err != nil {
 		return "", err
 	}
-	if s.advance(n) {
+	if s.Advance(n) {
 		return consumed, nil
 	}
 	return "", nil
 }
 
-// Advances 'n' characters in the scanner. Returns whether the scanner was advanced.
-func (s *Scanner) advance(n int) bool {
-	if s.ended() {
+// Advance skips 'n' characters in the scanner. Returns whether the scanner was advanced.
+func (s *Scanner) Advance(n int) bool {
+	if s.Ended() {
 		return false
 	}
 
-	s.currentIndex += n
+	s.CurrentIndex += n
 	return true
 }
 
-// Advances through all whitespace characters.
+// AdvanceWhitespace skips through all whitespace characters.
 //
 // A whitespace character is defined as either of the following: horizontal tab ('\t'),
 // line feed ('\n'), vertical tab ('\v'), form feed ('\f'), carriage return ('\r'),
 // space (' '), next line (U+0085; NEL) and non-breaking space (U+00A0; NBSP).
-func (s *Scanner) advanceWhitespace() {
+func (s *Scanner) AdvanceWhitespace() {
 	for {
-		ch, err := s.peek(1)
+		ch, err := s.Peek(1)
 		if err == io.EOF {
 			break
 		}
@@ -63,18 +63,18 @@ func (s *Scanner) advanceWhitespace() {
 			break
 		}
 
-		s.advance(1)
+		s.Advance(1)
 	}
 }
 
-// Scans until 'delimiter' is reached.
+// ConsumeUntil scans until 'delimiter' is reached.
 //
-// The return values are a string of the contents before the delimiter and
-// a boolean indicating whether the delimiter was reached.
+// It returns a string of the contents before the delimiter and a boolean
+// indicating whether the delimiter was reached.
 //
 // If the delimiter is not reached, the entire contents will be consumed.
-func (s *Scanner) consumeUntil(delimiter byte) (string, bool) {
-	if s.ended() {
+func (s *Scanner) ConsumeUntil(delimiter byte) (string, bool) {
+	if s.Ended() {
 		return "", false
 	}
 
@@ -82,7 +82,7 @@ func (s *Scanner) consumeUntil(delimiter byte) (string, bool) {
 	var accumulated string
 
 	for !delimiterFound {
-		ch, err := s.peek(1)
+		ch, err := s.Peek(1)
 		if err == io.EOF {
 			break
 		}
@@ -93,7 +93,7 @@ func (s *Scanner) consumeUntil(delimiter byte) (string, bool) {
 		}
 
 		accumulated += ch
-		s.advance(1)
+		s.Advance(1)
 	}
 
 	return accumulated, delimiterFound

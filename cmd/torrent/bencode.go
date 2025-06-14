@@ -21,11 +21,11 @@ import (
 //
 // For example 4:spam corresponds to 'spam'.
 func ParseBencodeString(scanner *Scanner) (string, error) {
-	start := scanner.currentIndex
-	digitStr, found := scanner.consumeUntil(':')
+	start := scanner.CurrentIndex
+	digitStr, found := scanner.ConsumeUntil(':')
 
 	if !found {
-		scanner.currentIndex = start
+		scanner.CurrentIndex = start
 		return "", fmt.Errorf("expected length specification")
 	}
 
@@ -34,9 +34,9 @@ func ParseBencodeString(scanner *Scanner) (string, error) {
 		return "", fmt.Errorf("length conversion errored: %w", err)
 	}
 
-	scanner.advance(1) // past the ":"
+	scanner.Advance(1) // past the ":"
 
-	strVal, err := scanner.consume(strLen)
+	strVal, err := scanner.Consume(strLen)
 	if err != nil {
 		return "", err
 	}
@@ -52,8 +52,8 @@ func ParseBencodeString(scanner *Scanner) (string, error) {
 // Integers have no size limitation. i-0e is invalid. All encodings with a
 // leading zero, such as i03e, are invalid, other than i0e, which is just zero.
 func ParseBencodeInteger(scanner *Scanner) (int, error) {
-	scanner.advance(1) // past the 'i'
-	digitStr, found := scanner.consumeUntil('e')
+	scanner.Advance(1) // past the 'i'
+	digitStr, found := scanner.ConsumeUntil('e')
 
 	if !found {
 		return 0, fmt.Errorf("expected end of integer")
@@ -64,7 +64,7 @@ func ParseBencodeInteger(scanner *Scanner) (int, error) {
 		return 0, fmt.Errorf("integer conversion errored: %s", err)
 	}
 
-	scanner.advance(1)
+	scanner.Advance(1)
 	return number, nil
 }
 
@@ -75,18 +75,18 @@ func ParseBencodeInteger(scanner *Scanner) (int, error) {
 func ParseBencodeList(scanner *Scanner) ([]any, error) {
 	var tokens []any
 
-	scanner.advance(1) // past the "l"
+	scanner.Advance(1) // past the "l"
 
-	for !scanner.ended() {
-		scanner.advanceWhitespace()
+	for !scanner.Ended() {
+		scanner.AdvanceWhitespace()
 
-		ch, err := scanner.peek(1)
+		ch, err := scanner.Peek(1)
 		if err == io.EOF {
 			return nil, err
 		}
 
 		if ch[0] == 'e' {
-			scanner.advance(1) // advance past the 'e'
+			scanner.Advance(1) // advance past the 'e'
 			break
 		}
 
@@ -113,16 +113,16 @@ func ParseBencodeList(scanner *Scanner) ([]any, error) {
 func ParseBencodeDictionary(scanner *Scanner) (map[string]any, error) {
 	dictionary := make(map[string]any)
 
-	scanner.advance(1)
-	for !scanner.ended() {
-		scanner.advanceWhitespace()
-		ch, err := scanner.peek(1)
+	scanner.Advance(1)
+	for !scanner.Ended() {
+		scanner.AdvanceWhitespace()
+		ch, err := scanner.Peek(1)
 		if err != nil {
 			return nil, err
 		}
 
 		if ch[0] == 'e' {
-			scanner.advance(1)
+			scanner.Advance(1)
 			break
 		}
 
@@ -131,7 +131,7 @@ func ParseBencodeDictionary(scanner *Scanner) (map[string]any, error) {
 			return nil, err
 		}
 
-		scanner.advanceWhitespace()
+		scanner.AdvanceWhitespace()
 		value, err := ParseBencodeToken(scanner)
 		if err != nil {
 			return nil, err
@@ -146,7 +146,7 @@ func ParseBencodeDictionary(scanner *Scanner) (map[string]any, error) {
 // Parses any valid Bencode token. The 4 data types supported by Bencode are
 // Integers, Strings, Lists and Dictionaries.
 func ParseBencodeToken(scanner *Scanner) (any, error) {
-	ch, err := scanner.peek(1)
+	ch, err := scanner.Peek(1)
 	if err == io.EOF {
 		return nil, err
 	}
@@ -166,12 +166,12 @@ func ParseBencodeToken(scanner *Scanner) (any, error) {
 
 // Decodes a Bencoded string into a Go object.
 func DecodeBencode(contents string) ([]any, error) {
-	scanner := Scanner{contents: contents, currentIndex: 0}
+	scanner := Scanner{Contents: contents, CurrentIndex: 0}
 
 	var tokens []any
 
-	for !scanner.ended() {
-		scanner.advanceWhitespace()
+	for !scanner.Ended() {
+		scanner.AdvanceWhitespace()
 
 		token, err := ParseBencodeToken(&scanner)
 		if err != nil {
