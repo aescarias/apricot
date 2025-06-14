@@ -37,6 +37,17 @@ type Info struct {
 	Files *[]InfoFile
 }
 
+/* PieceHashes returns a slice of all SHA1 piece hashes. */
+func (i *Info) PieceHashes() []string {
+	var hashes []string
+
+	for idx := 0; idx <= len(i.Pieces)-20; idx += 20 {
+		hashes = append(hashes, i.Pieces[idx:idx+20])
+	}
+
+	return hashes
+}
+
 type InfoFile struct {
 	// The length of the file in bytes.
 	Length int
@@ -119,7 +130,7 @@ func NewTorrent(contents map[string]any) (*Torrent, error) {
 	}, nil
 }
 
-// Returns a Bencodable representation of the info struct.
+// Bencodable returns a Bencodable representation of the info struct.
 func (i *Info) Bencodable() map[string]any {
 	contents := map[string]any{
 		"name":         i.Name,
@@ -143,7 +154,7 @@ func (i *Info) Bencodable() map[string]any {
 	return contents
 }
 
-// Returns the info hash as a byte sequence.
+// Hash returns the info hash as a byte sequence and an error if any.
 //
 // The info hash is a SHA1 hash of the bencoded info struct.
 func (i *Info) Hash() ([]byte, error) {
@@ -176,7 +187,13 @@ func compactToPeerList(peers string) []TrackerPeer {
 	return peerList
 }
 
-/* Gets announced tracker peers. */
+/*
+GetPeers gets the tracker peers announced by a URL in the announce list.
+Returns the tracker response including the peers and an error if any.
+
+A tracker may announce peers over TCP, UDP, or WebSockets. Only the former
+is implemented.
+*/
 func (t *Torrent) GetPeers(peerId string) (*TrackerResponse, error) {
 	announce, err := url.Parse(t.AnnounceURL)
 	if err != nil {
