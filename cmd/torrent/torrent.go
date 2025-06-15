@@ -48,11 +48,69 @@ func (i *Info) PieceHashes() []string {
 	return hashes
 }
 
+/*
+TotalLength returns the total amount of bytes contained in this torrent.
+
+For single file torrents, this returns the same value as Length. For multiple file
+torrents, this returns the sum of the file lengths in the torrent.
+*/
+func (i *Info) TotalLength() int {
+	if len(*i.Files) <= 0 {
+		return *i.Length
+	}
+
+	total := 0
+
+	for _, file := range *i.Files {
+		total += file.Length
+	}
+
+	return total
+}
+
 type InfoFile struct {
 	// The length of the file in bytes.
 	Length int
 	// A slice of path parts ending with the filename.
 	Path []string
+}
+
+type TrackerEvent string
+
+const (
+	EventStarted   TrackerEvent = "started"
+	EventCompleted TrackerEvent = "completed"
+	EventStopped   TrackerEvent = "stopped"
+	EventEmpty     TrackerEvent = "empty"
+)
+
+type TrackerRequest struct {
+	// The 20-byte info hash which is the SHA1 hash of the bencoded form of the info value from the metainfo file.
+	InfoHash string
+	// A string of length 20 identifying the downloader.
+	PeerId string
+	// (optional) The IP or DNS name which this peer is at.
+	Ip string
+	// The port number the peer is listening on.
+	Port int
+	// The total amount uploaded so far.
+	Uploaded int
+	// The total amount downloaded so far.
+	Downloaded int
+	// The number of bytes this peer still has to download.
+	Left int
+	// (optional) An announcement to the tracker.
+	//
+	// 'started' announces that the download has just started. 'stopped' announces
+	// that the downloader has ceased downloading. 'completed' announces that the
+	// downloader has completely downloaded the file. 'empty' is a no op.
+	Event TrackerEvent
+	// (optional) Whether to represent the peer list in compact format. 0 means no, 1 means yes.
+	//
+	// This field is merely advisory. A tracker may send peers in any format desired
+	// regardless of whether 'compact' is 0 or 1. A tracker may also refuse connections
+	// that use 'compact=0'.
+	Compact int
 }
 
 type TrackerResponse struct {
@@ -194,7 +252,7 @@ Returns the tracker response including the peers and an error if any.
 A tracker may announce peers over TCP, UDP, or WebSockets. Only the former
 is implemented.
 */
-func (t *Torrent) GetPeers(peerId string) (*TrackerResponse, error) {
+func (t *Torrent) GetPeers(request TrackerRequest) (*TrackerResponse, error) {
 	announce, err := url.Parse(t.AnnounceURL)
 	if err != nil {
 		return nil, fmt.Errorf("could not parse url: %w", err)
@@ -204,18 +262,18 @@ func (t *Torrent) GetPeers(peerId string) (*TrackerResponse, error) {
 	case "http", "https":
 		query := announce.Query()
 
-		infohash, err := t.Info.Hash()
-		if err != nil {
-			return nil, fmt.Errorf("could not get info hash: %w", err)
+		query.Set("info_hash", request.InfoHash)
+		query.Set("peer_id", request.PeerId)
+		query.Set("left", fmt.Sprint(request.Left))
+		query.Set("downloaded", fmt.Sprint(request.Downloaded))
+		query.Set("uploaded", fmt.Sprint(request.Uploaded))
+
+		if len(request.Ip) > 0 {
+			query.Set("ip", request.Ip)
 		}
 
-		query.Set("info_hash", string(infohash))
-		query.Set("peer_id", peerId)
-		query.Set("left", fmt.Sprint(*t.Info.Length))
-		query.Set("downloaded", "0")
-		query.Set("uploaded", "0")
-		// TODO: This would preferably be cycled (port in URL, then 6881, then 6882, and so on).
-		query.Set("port", "6881")
+		query.Set("port", fmt.Sprint(request.Port))
+		query.Set("compact", fmt.Sprint(request.Compact))
 
 		announce.RawQuery = query.Encode()
 	default:
@@ -227,6 +285,10 @@ func (t *Torrent) GetPeers(peerId string) (*TrackerResponse, error) {
 		return nil, fmt.Errorf("request to tracker failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("request to tracker returned %s", resp.Status)
+	}
 
 	read, err := io.ReadAll(resp.Body)
 	if err != nil {

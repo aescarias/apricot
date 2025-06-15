@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+// While the v1 BitTorrent spec describes 32 KiB as a block size,
+// in reality, most trackers use and even force 16 KiB block sizes.
+
+const BLOCK_SIZE = 16 * 1024
 const VERSION = "0.1.0"
 
 func makePeerId() string {
@@ -26,8 +30,7 @@ func OpenTorrent(filename string) *Torrent {
 	contents, err := os.ReadFile(filename)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Printf("The filename %q does not exist.\n", filename)
-			os.Exit(1)
+			log.Fatalf("The file %q does not exist.", filename)
 		} else {
 			log.Fatal(err)
 		}
@@ -35,17 +38,17 @@ func OpenTorrent(filename string) *Torrent {
 
 	tokens, err := DecodeBencode(string(contents))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("could not decode file: %s", err)
 	}
 
 	metainfo, ok := tokens[0].(map[string]any)
 	if !ok {
-		log.Fatal("data error: expected metainfo dictionary.")
+		log.Fatalf("failed to read torrent: expected metainfo dictionary.")
 	}
 
 	torrent, err := NewTorrent(metainfo)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to read torrent: %s", err)
 	}
 
 	return torrent
@@ -54,7 +57,22 @@ func OpenTorrent(filename string) *Torrent {
 func ShowPeers(filename string) {
 	torrent := OpenTorrent(filename)
 
-	resp, err := torrent.GetPeers(makePeerId())
+	infoHash, err := torrent.Info.Hash()
+	if err != nil {
+		log.Fatalf("failed to generate info hash: %s", err)
+	}
+
+	resp, err := torrent.GetPeers(
+		TrackerRequest{
+			InfoHash:   string(infoHash),
+			PeerId:     makePeerId(),
+			Port:       6881,
+			Uploaded:   0,
+			Downloaded: 0,
+			Left:       *torrent.Info.Length,
+			Compact:    1,
+		},
+	)
 	var fr *ErrFailureReason
 	if errors.As(err, &fr) {
 		log.Fatalf("tracker returned error: %s", fr.Message)
@@ -67,7 +85,7 @@ func ShowPeers(filename string) {
 	fmt.Printf("request interval: %d seconds\n", resp.Interval)
 
 	if len(resp.Peers) <= 0 {
-		log.Printf("no peers")
+		fmt.Printf("no peers")
 		return
 	}
 
@@ -75,7 +93,9 @@ func ShowPeers(filename string) {
 		fmt.Println("peer", idx+1)
 		fmt.Println("  ip:     ", peer.Ip)
 		fmt.Println("  port:   ", peer.Port)
-		fmt.Printf("  peer id: %x\n", peer.PeerId)
+		if len(peer.PeerId) > 0 {
+			fmt.Printf("  peer id: %x\n", peer.PeerId)
+		}
 	}
 }
 
@@ -101,10 +121,9 @@ func ShowInfo(filename string) {
 	}
 
 	if len(files) > 0 {
-		for idx, file := range files {
-			fmt.Println("file", idx+1)
-			fmt.Println("  filepath:", strings.Join(file.Path, "/"))
-			fmt.Println("  length:", HumanBytes(file.Length))
+		fmt.Printf("files [%d]:\n", len(files))
+		for _, file := range files {
+			fmt.Printf("  %s [%s]\n", strings.Join(file.Path, "/"), HumanBytes(file.Length))
 		}
 	} else {
 		fmt.Println("file length:", HumanBytes(*torrent.Info.Length))
@@ -127,7 +146,7 @@ func ShowInfo(filename string) {
 
 	infoHash, err := torrent.Info.Hash()
 	if err != nil {
-		panic(err)
+		log.Fatalf("could not get info hash: %s", err)
 	}
 
 	infoDigest := hex.EncodeToString(infoHash)
