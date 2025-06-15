@@ -1,7 +1,7 @@
 // Implementation of the TCP peer protocol described in
 // https://bittorrent.org/beps/bep_0003.html#peer-messages
 
-package main
+package torrent
 
 import (
 	"bytes"
@@ -56,30 +56,56 @@ type Message struct {
 	//
 	// For each bit up to N pieces, 1 means that the tracker has the piece and 0 means
 	// otherwise. All bits after the N pieces must be zero.
-	BitField []byte
+	BitField BitField
 	// If message ID is request (6) or cancel (7), the request details.
 	Request Request
 	// If message ID is piece (7), the contents of the piece.
 	Block Block
 }
 
+type BitField struct {
+	Field  []byte
+	Length int
+}
+
+// HasPiece reports whether the piece at 'index' is contained in the bit field.
+func (bf *BitField) HasPiece(index int) bool {
+	if index >= bf.Length {
+		return false
+	}
+
+	pieceByte := int(bf.Field[index/8])
+	offset := index % 8
+	return pieceByte&(1<<7-offset) != 0
+}
+
 type Request struct {
-	Index  uint32
-	Begin  uint32
-	Length uint32
+	Index  uint32 // The zero-based piece index.
+	Begin  uint32 // The zero-based byte offset within the piece.
+	Length uint32 // The byte length of the piece.
 }
 
 type Block struct {
-	Index uint32
-	Begin uint32
-	Data  []byte
+	Index uint32 // The zero-based piece index.
+	Begin uint32 // The zero-based byte offset within the piece.
+	Block []byte // A block of data representing a subset of the piece.
 }
 
-func (c *TCPClient) makeHandshakeMessage(infoHash string) ([]byte, error) {
-	return []byte(
-		"\x13BitTorrent protocol\x00\x00\x00\x00\x00\x00\x00\x00" +
-			infoHash + c.PeerId,
-	), nil
+type Handshake struct {
+	Protocol string  // The handshake protocol, usually "BitTorrent protocol"
+	Reserved [8]byte // Reserved bytes. Used by extensions, otherwise zeroed.
+	InfoHash string  // The 20-byte info hash
+	PeerId   string  // The 20-char peer ID
+}
+
+func (h *Handshake) Serialized() []byte {
+	message := []byte{}
+	message = append(message, byte(len(h.Protocol)))
+	message = append(message, []byte(h.Protocol)...)
+	message = append(message, []byte(h.InfoHash)...)
+	message = append(message, []byte(h.PeerId)...)
+
+	return message
 }
 
 /*
@@ -101,36 +127,38 @@ func (c *TCPClient) Handshake(peer TrackerPeer) (net.Conn, error) {
 	}
 
 	// Send our handshake message to the connection
-	msg, err := c.makeHandshakeMessage(string(infoHash))
-	if err != nil {
-		return nil, err
+	handshake := Handshake{
+		Protocol: "BitTorrent protocol",
+		Reserved: [8]byte{0, 0, 0, 0, 0, 0, 0, 0},
+		InfoHash: string(infoHash),
+		PeerId:   c.PeerId,
 	}
 
-	_, err = conn.Write(msg)
+	_, err = conn.Write(handshake.Serialized())
 	if err != nil {
-		return nil, fmt.Errorf("could not send handshake request: %w", err)
+		return nil, fmt.Errorf("could not send handshake message: %w", err)
 	}
 
 	// Process and validate the handshake sent by the tracker.
 	pStrLen, err := ReadN(1, conn)
 	if err != nil {
-		return nil, fmt.Errorf("could not read tracker handshake: %w", err)
+		return nil, fmt.Errorf("could not read peer handshake: %w", err)
 	}
 
 	if _, err := ReadN(int(pStrLen[0]), conn); err != nil {
-		return nil, fmt.Errorf("could not read tracker handshake protocol: %w", err)
+		return nil, fmt.Errorf("could not read peer handshake protocol: %w", err)
 	}
 
 	if _, err := ReadN(8, conn); err != nil {
 		return nil, fmt.Errorf("could not read reserved bytes: %w", err)
 	}
 
-	retInfoHash, err := ReadN(20, conn)
+	sentInfoHash, err := ReadN(20, conn)
 	if err != nil {
 		return nil, fmt.Errorf("could not read info hash: %w", err)
 	}
 
-	if !bytes.Equal(retInfoHash, infoHash) {
+	if !bytes.Equal(sentInfoHash, infoHash) {
 		return nil, fmt.Errorf("ending due to info hash mismatch")
 	}
 
@@ -181,7 +209,15 @@ func (c *TCPClient) ReadMessage(peer TrackerPeer) (*Message, error) {
 	case MessageHave:
 		return &Message{Id: msgId, PieceIndex: binary.BigEndian.Uint32(msgSlice)}, nil
 	case MessageBitfield:
-		return &Message{Id: msgId, BitField: msgSlice}, nil
+		pieces := c.MetaInfo.Info.PieceHashes()
+
+		return &Message{
+			Id: msgId,
+			BitField: BitField{
+				Field:  msgSlice,
+				Length: len(pieces),
+			},
+		}, nil
 	case MessageRequest, MessageCancel:
 		index := binary.BigEndian.Uint32(msgSlice[0:4])
 		begin := binary.BigEndian.Uint32(msgSlice[4:8])
@@ -198,10 +234,10 @@ func (c *TCPClient) ReadMessage(peer TrackerPeer) (*Message, error) {
 
 		return &Message{
 			Id:    msgId,
-			Block: Block{Index: index, Begin: begin, Data: block},
+			Block: Block{Index: index, Begin: begin, Block: block},
 		}, nil
 	default:
-		return &Message{Generic: true, Id: msgId}, nil
+		return &Message{Generic: true, Contents: msgSlice, Id: msgId}, nil
 	}
 }
 
@@ -224,7 +260,7 @@ func (c *TCPClient) SendMessage(peer TrackerPeer, message Message) error {
 
 	switch message.Id {
 	case MessageChoke, MessageUnchoke, MessageInterested, MessageNotInterested:
-		buf := binary.BigEndian.AppendUint32([]byte{}, 1)
+		buf := binary.BigEndian.AppendUint32([]byte{}, 1) // length prefix
 		buf = append(buf, byte(message.Id))
 
 		conn.Write(buf)

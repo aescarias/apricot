@@ -1,3 +1,3 @@
-module github.com/aescarias/gostream
+module github.com/aescarias/apricot
 
 go 1.24.2

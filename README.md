@@ -1,4 +1,4 @@
-# gostream
+# Apricot
 
 A toy client implementation of the [BitTorrent protocol](https://en.wikipedia.org/wiki/BitTorrent).
 

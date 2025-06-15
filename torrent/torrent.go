@@ -8,7 +8,7 @@ Unofficial, "formal" spec
 	https://wiki.theory.org/BitTorrentSpecification
 */
 
-package main
+package torrent
 
 import (
 	"crypto/sha1"
@@ -17,6 +17,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/aescarias/apricot/torrent/bencode"
 )
 
 type Torrent struct {
@@ -218,7 +220,7 @@ func (i *Info) Bencodable() map[string]any {
 func (i *Info) Hash() ([]byte, error) {
 	bencodable := i.Bencodable()
 
-	bencoded, err := EncodeBencode(bencodable)
+	bencoded, err := bencode.EncodeBencode(bencodable)
 	if err != nil {
 		return nil, fmt.Errorf("could not bencode data for info hash: %w", err)
 	}
@@ -295,7 +297,7 @@ func (t *Torrent) GetPeers(request TrackerRequest) (*TrackerResponse, error) {
 		return nil, fmt.Errorf("could not read response: %w", err)
 	}
 
-	tokens, err := DecodeBencode(string(read))
+	tokens, err := bencode.DecodeBencode(string(read))
 	if err != nil {
 		return nil, fmt.Errorf("could not decode response: %w", err)
 	}

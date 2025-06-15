@@ -1,6 +1,5 @@
 /* A generic text scanner. */
-
-package main
+package bencode
 
 import (
 	"io"

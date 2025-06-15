@@ -5,28 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"strings"
+
+	"github.com/aescarias/apricot/torrent"
+	"github.com/aescarias/apricot/torrent/bencode"
 )
 
-// While the v1 BitTorrent spec describes 32 KiB as a block size,
-// in reality, most trackers use and even force 16 KiB block sizes.
+const NAME = "Apricot"
 
-const BLOCK_SIZE = 16 * 1024
-const VERSION = "0.1.0"
+var VERSION = Version{Major: 0, Minor: 1, Patch: 0}
 
-func makePeerId() string {
-	// A peer ID is 20 bytes long. There are a few conventions in use for peer
-	// IDs. The one used here (Azureus-style) includes a client and version
-	// identifier alongside 12 random numbers.
-	min, max := 100_000_000_000, 999_999_999_999
-	randVal := rand.Intn(max+1-min) + min
-
-	return fmt.Sprint("-GX0010-", randVal)
-}
-
-func OpenTorrent(filename string) *Torrent {
+func OpenTorrent(filename string) *torrent.Torrent {
 	contents, err := os.ReadFile(filename)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -36,44 +26,45 @@ func OpenTorrent(filename string) *Torrent {
 		}
 	}
 
-	tokens, err := DecodeBencode(string(contents))
+	tokens, err := bencode.DecodeBencode(string(contents))
 	if err != nil {
-		log.Fatalf("could not decode file: %s", err)
+		log.Fatalf("failed to decode torrent file: %s", err)
 	}
 
-	metainfo, ok := tokens[0].(map[string]any)
+	metaInfo, ok := tokens[0].(map[string]any)
 	if !ok {
-		log.Fatalf("failed to read torrent: expected metainfo dictionary.")
+		log.Fatalf("failed to read torrent file: expected meta info dictionary.")
 	}
 
-	torrent, err := NewTorrent(metainfo)
+	torrentFile, err := torrent.NewTorrent(metaInfo)
 	if err != nil {
-		log.Fatalf("failed to read torrent: %s", err)
+		log.Fatalf("failed to read torrent file: %s", err)
 	}
 
-	return torrent
+	return torrentFile
 }
 
 func ShowPeers(filename string) {
-	torrent := OpenTorrent(filename)
+	torrentFile := OpenTorrent(filename)
 
-	infoHash, err := torrent.Info.Hash()
+	infoHash, err := torrentFile.Info.Hash()
 	if err != nil {
 		log.Fatalf("failed to generate info hash: %s", err)
 	}
 
-	resp, err := torrent.GetPeers(
-		TrackerRequest{
+	resp, err := torrentFile.GetPeers(
+		torrent.TrackerRequest{
 			InfoHash:   string(infoHash),
-			PeerId:     makePeerId(),
+			PeerId:     MakePeerId(VERSION),
 			Port:       6881,
 			Uploaded:   0,
 			Downloaded: 0,
-			Left:       *torrent.Info.Length,
+			Left:       *torrentFile.Info.Length,
 			Compact:    1,
 		},
 	)
-	var fr *ErrFailureReason
+
+	var fr *torrent.ErrFailureReason
 	if errors.As(err, &fr) {
 		log.Fatalf("tracker returned error: %s", fr.Message)
 	}
@@ -100,24 +91,24 @@ func ShowPeers(filename string) {
 }
 
 func ShowPieces(filename string) {
-	torrent := OpenTorrent(filename)
+	torrentFile := OpenTorrent(filename)
 
-	for _, piece := range torrent.Info.PieceHashes() {
+	for _, piece := range torrentFile.Info.PieceHashes() {
 		pieceStr := hex.EncodeToString([]byte(piece))
 		fmt.Printf("%v\n", pieceStr)
 	}
 }
 
 func ShowInfo(filename string) {
-	torrent := OpenTorrent(filename)
+	torrentFile := OpenTorrent(filename)
 
-	fmt.Println("announce url:", torrent.AnnounceURL)
+	fmt.Println("announce url:", torrentFile.AnnounceURL)
 
-	files := *torrent.Info.Files
+	files := *torrentFile.Info.Files
 	if len(files) > 0 {
-		fmt.Println("dirname:", torrent.Info.Name)
+		fmt.Println("dirname:", torrentFile.Info.Name)
 	} else {
-		fmt.Println("filename:", torrent.Info.Name)
+		fmt.Println("filename:", torrentFile.Info.Name)
 	}
 
 	if len(files) > 0 {
@@ -126,12 +117,12 @@ func ShowInfo(filename string) {
 			fmt.Printf("  %s [%s]\n", strings.Join(file.Path, "/"), HumanBytes(file.Length))
 		}
 	} else {
-		fmt.Println("file length:", HumanBytes(*torrent.Info.Length))
+		fmt.Println("file length:", HumanBytes(*torrentFile.Info.Length))
 	}
 
-	fmt.Println("piece length:", HumanBytes(torrent.Info.PieceLength))
+	fmt.Println("piece length:", HumanBytes(torrentFile.Info.PieceLength))
 
-	pieceHashes := torrent.Info.PieceHashes()
+	pieceHashes := torrentFile.Info.PieceHashes()
 
 	fmt.Printf("pieces [%d]: \n", len(pieceHashes))
 
@@ -144,7 +135,7 @@ func ShowInfo(filename string) {
 		fmt.Println("  (...)")
 	}
 
-	infoHash, err := torrent.Info.Hash()
+	infoHash, err := torrentFile.Info.Hash()
 	if err != nil {
 		log.Fatalf("could not get info hash: %s", err)
 	}
@@ -155,7 +146,7 @@ func ShowInfo(filename string) {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Printf("gostream %s\n", VERSION)
+		fmt.Printf("%s %s\n", NAME, VERSION)
 		fmt.Printf("usage: %s {info,peers,pieces} <options>\n", os.Args[0])
 		os.Exit(1)
 	}

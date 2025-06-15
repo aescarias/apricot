@@ -2,9 +2,17 @@
 	Encoder and decoder for the Bencode data serialization format.
 
 	See https://bittorrent.org/beps/bep_0003.html#bencoding
+
+	Implementation Notes: This Bencode decoder allows for an arbitrary amount of
+	whitespace characters to appear between the tokens for debugging purposes.
+
+	A whitespace character is defined as either of the following characters:
+		horizontal tab ('\t'), line feed ('\n'), vertical tab ('\v'),
+		form feed ('\f'), carriage return ('\r'), space (' '),
+		next line (U+0085; NEL), non-breaking space (U+00A0; NBSP)
 */
 
-package main
+package bencode
 
 import (
 	"fmt"
