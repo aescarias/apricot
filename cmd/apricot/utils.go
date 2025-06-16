@@ -33,8 +33,8 @@ func HumanBytes(bytes int) string {
 func RandIntString(n int) string {
 	var contents string
 
-	for _ = range n {
-		contents += fmt.Sprint(rand.Intn(2))
+	for range n {
+		contents += fmt.Sprint(rand.Intn(10))
 	}
 
 	return contents

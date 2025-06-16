@@ -54,12 +54,12 @@ func ShowPeers(filename string) {
 
 	resp, err := torrentFile.GetPeers(
 		torrent.TrackerRequest{
-			InfoHash:   string(infoHash),
+			InfoHash:   infoHash,
 			PeerId:     MakePeerId(VERSION),
 			Port:       6881,
 			Uploaded:   0,
 			Downloaded: 0,
-			Left:       *torrentFile.Info.Length,
+			Left:       torrentFile.Info.TotalLength(),
 			Compact:    1,
 		},
 	)
@@ -104,7 +104,7 @@ func ShowInfo(filename string) {
 
 	fmt.Println("announce url:", torrentFile.AnnounceURL)
 
-	files := *torrentFile.Info.Files
+	files := torrentFile.Info.Files
 	if len(files) > 0 {
 		fmt.Println("dirname:", torrentFile.Info.Name)
 	} else {
@@ -116,8 +116,9 @@ func ShowInfo(filename string) {
 		for _, file := range files {
 			fmt.Printf("  %s [%s]\n", strings.Join(file.Path, "/"), HumanBytes(file.Length))
 		}
+		fmt.Println("total length:", HumanBytes(torrentFile.Info.TotalLength()))
 	} else {
-		fmt.Println("file length:", HumanBytes(*torrentFile.Info.Length))
+		fmt.Println("file length:", HumanBytes(torrentFile.Info.Length))
 	}
 
 	fmt.Println("piece length:", HumanBytes(torrentFile.Info.PieceLength))
@@ -127,8 +128,7 @@ func ShowInfo(filename string) {
 	fmt.Printf("pieces [%d]: \n", len(pieceHashes))
 
 	for idx := range 2 {
-		pieceStr := hex.EncodeToString([]byte(pieceHashes[idx]))
-		fmt.Printf("  %v\n", pieceStr)
+		fmt.Printf("  %x\n", pieceHashes[idx])
 	}
 
 	if len(pieceHashes) > 3 {
@@ -140,8 +140,7 @@ func ShowInfo(filename string) {
 		log.Fatalf("could not get info hash: %s", err)
 	}
 
-	infoDigest := hex.EncodeToString(infoHash)
-	fmt.Print("info hash: ", infoDigest)
+	fmt.Printf("info hash: %x\n", infoHash)
 }
 
 func main() {
